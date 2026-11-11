@@ -120,8 +120,8 @@ enforces the rules that keep tokens alive:
 - Broadcasts **abort after 8 consecutive failures** instead of hammering
   Telegram, and dead groups are deactivated automatically.
 - `/purge` deletes are throttled (~20/second) with flood-control retries.
-- Restart uses `drop_pending_updates=True`, so old backlogs never replay as a
-  message burst.
+- Polling uses `drop_pending_updates=False` so updates queued during a brief
+  restart/failover are not deliberately discarded.
 - Run **exactly one** polling process per token (see `render.yaml`).
 - Never commit or publicly share `BOT_TOKEN`. Anyone holding a leaked token can
   get it frozen; if a token ever leaks, revoke it immediately with

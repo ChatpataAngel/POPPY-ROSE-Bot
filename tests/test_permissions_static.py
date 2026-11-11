@@ -124,6 +124,7 @@ def test_catch_all_handlers_are_isolated():
     assert "GROUP_GREETING_CAPTURE = 1" in main_src
     assert "GROUP_LOCK_FILTER = 2" in main_src
     assert "GROUP_MEMBER_EVENTS = 3" in main_src
+    assert "GROUP_BOT_STATUS_EVENTS = 4" in main_src
 
 
 def test_broadcast_operations_are_rate_limited():

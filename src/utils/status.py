@@ -1,11 +1,13 @@
 """In-process health counters for the /ping diagnostics command.
 
-Lives in src.utils (not src.__main__) so both the shared error handler and
-the /ping command can import it without a circular import.
+Error summaries are exposed through the dashboard status API and Telegram
+/ping command, so they are sanitized before being stored.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
+
+from src.utils.logging_config import redact_secrets
 
 _STARTED_AT = datetime.now(timezone.utc)
 
@@ -15,15 +17,15 @@ _last_error_text = ""
 
 
 def record_error(text: str) -> None:
-    """Record an error seen by the PTB error handler (called for every update error)."""
+    """Record a sanitized error seen by the bot or polling lifecycle."""
     global _error_count, _last_error_at, _last_error_text
     _error_count += 1
     _last_error_at = datetime.now(timezone.utc)
-    _last_error_text = text
+    _last_error_text = redact_secrets(text)
 
 
 def error_status() -> tuple[int, str, datetime | None]:
-    """Return (count_since_start, last_error_text, last_error_at)."""
+    """Return (count_since_start, sanitized last error text, last error time)."""
     return _error_count, _last_error_text, _last_error_at
 
 

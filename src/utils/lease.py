@@ -42,6 +42,7 @@ from config import (
 )
 from src.database.db_core import db
 from src.utils.status import record_error
+from src.utils.logging_config import redact_secrets
 
 log = logging.getLogger("poppy_rose.lease")
 
@@ -77,7 +78,7 @@ def get_state() -> dict:
         "since": _state["since"],
         "lease_expires_in": expires_in,
         "last_attempt": _state["last_attempt"],
-        "last_error": _state["last_error"],
+        "last_error": redact_secrets(_state["last_error"]),
         "instance_id": INSTANCE_ID,
         "ha_enabled": HA_ENABLED,
     }
@@ -224,7 +225,9 @@ async def leader_loop(app, stop: asyncio.Event | None = None) -> None:
             except Exception as exc:
                 # Mongo unreachable → leadership unknown → KEEP current role.
                 acquired = None
-                _state["last_error"] = f"lease acquire failed: {type(exc).__name__}: {exc}"
+                _state["last_error"] = redact_secrets(
+                    f"lease acquire failed: {type(exc).__name__}: {exc}"
+                )
                 if not _shutting_down:
                     record_error(f"Lease: {type(exc).__name__}: {exc}")
                 log.warning("Leader lease check failed | %s", exc)
@@ -247,7 +250,9 @@ async def leader_loop(app, stop: asyncio.Event | None = None) -> None:
                     )
                 except Exception as exc:
                     _state["polling"] = False
-                    _state["last_error"] = f"polling start failed: {type(exc).__name__}: {exc}"
+                    _state["last_error"] = redact_secrets(
+                        f"polling start failed: {type(exc).__name__}: {exc}"
+                    )
                     if not _shutting_down:
                         record_error(f"PollingStart: {type(exc).__name__}: {exc}")
                     log.exception("Could not start polling; will retry next tick")

@@ -6,6 +6,11 @@ import asyncio
 import logging
 from collections import OrderedDict
 
+from src.utils.logging_config import configure_logging
+
+# Configure secure logging before importing application modules that may log.
+configure_logging()
+
 from telegram import (
     Update,
     BotCommandScopeAllChatAdministrators,
@@ -17,6 +22,7 @@ from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
@@ -25,7 +31,6 @@ from config import (
     BOT_TOKEN,
     HA_ENABLED,
     INSTANCE_ID,
-    LOG_LEVEL,
     OWNER_ID,
     validate_config,
 )
@@ -48,6 +53,7 @@ from src.modules.greetings_broadcast import (
     greet_broadcast_handlers,
     greet_message_handlers,
     member_handlers,
+    bot_membership_handlers,
 )
 
 from src.modules.locks_purge import (
@@ -80,18 +86,6 @@ from src.utils.lease import (
 )
 
 
-logging.basicConfig(
-    format=(
-        "%(asctime)s | %(levelname)s | "
-        "%(name)s | %(message)s"
-    ),
-    level=getattr(
-        logging,
-        LOG_LEVEL,
-        logging.INFO,
-    ),
-)
-
 log = logging.getLogger("poppy_rose")
 
 
@@ -118,6 +112,44 @@ def _remember(
         cache.popitem(last=False)
 
     return True
+
+
+async def audit_update(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    """Log update metadata without logging user messages or credentials."""
+    update_type = next(
+        (
+            name
+            for name in Update.ALL_TYPES
+            if getattr(update, name, None) is not None
+        ),
+        "unknown",
+    )
+    user = update.effective_user
+    chat = update.effective_chat
+    message = update.effective_message
+
+    command = None
+    if message and message.text and message.text.startswith("/"):
+        command = message.text.split(maxsplit=1)[0].split("@", 1)[0]
+
+    # Keep ordinary message traffic at DEBUG to prevent noisy production logs.
+    # Membership events, commands, callbacks and other system updates are INFO.
+    level = (
+        logging.INFO
+        if command or update_type not in {"message", "edited_message"}
+        else logging.DEBUG
+    )
+    log.log(
+        level,
+        "UPDATE_RECEIVED | type=%s | chat_id=%s | user_id=%s | command=%s",
+        update_type,
+        chat.id if chat else None,
+        user.id if user else None,
+        command or "-",
+    )
 
 
 async def tracker(
@@ -169,16 +201,17 @@ async def error_handler(
         f"{type(error).__name__}: {error}",
     )
 
-    if isinstance(error, TelegramError):
-        log.error(
-            "Telegram error: %s",
-            error,
-        )
-    else:
-        log.exception(
-            "Unhandled update error",
-            exc_info=error,
-        )
+    if error is None:
+        log.error("UPDATE_ERROR_HANDLER_CALLED_WITHOUT_EXCEPTION")
+        return
+
+    error_info = (type(error), error, error.__traceback__)
+    log.error(
+        "UPDATE_PROCESSING_FAILED | error_type=%s | telegram_error=%s",
+        type(error).__name__,
+        isinstance(error, TelegramError),
+        exc_info=error_info,
+    )
 
 
 async def post_init(app):
@@ -439,7 +472,7 @@ async def post_init(app):
             )
 
     log.info(
-        "%s started as @%s | configured_owner=%s",
+        "BOT_READY | name=%s | username=@%s | configured_owner_id=%s",
         BOT_NAME,
         me.username,
         OWNER_ID,
@@ -450,8 +483,10 @@ async def post_init(app):
 
 
 async def post_shutdown(app):
+    log.info("SHUTDOWN_STARTED | closing database connections")
     STATE["bot_ready"] = False
     await close_db()
+    log.info("SHUTDOWN_COMPLETE")
 
 
 # Handler groups (PTB evaluates groups in ascending order and runs at most
@@ -462,16 +497,25 @@ async def post_shutdown(app):
 #    1  : receive_greeting_post  (/setwelcome follow-up capture)
 #    2  : filter_locked          (content locks enforcement)
 #    3  : on_chat_member         (welcome/goodbye dispatch)
+#    4  : on_bot_chat_member     (bot admin-status audit)
 #
 # Each catch-all handler sits alone in its own group so it can neither
 # shadow nor be shadowed by another catch-all handler.
 GROUP_GREETING_CAPTURE = 1
 GROUP_LOCK_FILTER = 2
 GROUP_MEMBER_EVENTS = 3
+GROUP_BOT_STATUS_EVENTS = 4
 
 
 def register_handlers(app):
     """Attach every handler (and the error handler) to the application."""
+
+    # Metadata-only audit handler sees every Telegram update. It never logs
+    # message bodies, file contents, callback payloads or credentials.
+    app.add_handler(
+        TypeHandler(Update, audit_update, block=False),
+        group=-20,
+    )
 
     app.add_handler(
         MessageHandler(
@@ -524,8 +568,19 @@ def register_handlers(app):
         group=GROUP_MEMBER_EVENTS,
     )
 
+    app.add_handlers(
+        bot_membership_handlers,
+        group=GROUP_BOT_STATUS_EVENTS,
+    )
+
     app.add_error_handler(
         error_handler,
+    )
+
+    log.info(
+        "HANDLERS_REGISTERED | commands_and_messages=enabled | chat_member=enabled | bot_membership_audit=enabled | member_group=%s | bot_status_group=%s",
+        GROUP_MEMBER_EVENTS,
+        GROUP_BOT_STATUS_EVENTS,
     )
 
 
@@ -547,7 +602,7 @@ def main():
     register_handlers(app)
 
     log.info(
-        "🌹 %s is starting... | ha_enabled=%s | instance=%s",
+        "STARTUP | app=%s | ha_enabled=%s | instance=%s | allowed_updates=ALL_TYPES",
         BOT_NAME,
         HA_ENABLED,
         INSTANCE_ID,
@@ -562,11 +617,15 @@ def main():
         asyncio.run(leader_loop(app))
     else:
         app.run_polling(
-            drop_pending_updates=True,
+            drop_pending_updates=False,
             allowed_updates=Update.ALL_TYPES,
             bootstrap_retries=-1,
         )
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        log.exception("FATAL_STARTUP_OR_RUNTIME_ERROR")
+        raise

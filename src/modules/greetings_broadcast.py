@@ -395,6 +395,12 @@ async def receive_greeting_post(
             data,
         )
     except Exception:
+        log.exception(
+            "GREETING_CONFIGURATION_SAVE_FAILED | chat_id=%s | setting=%s | user_id=%s",
+            chat.id,
+            setting_name,
+            user.id,
+        )
         context.user_data.pop(
             "pending_greeting",
             None,
@@ -409,6 +415,13 @@ async def receive_greeting_post(
     context.user_data.pop(
         "pending_greeting",
         None,
+    )
+    log.info(
+        "GREETING_CONFIGURATION_SAVED | chat_id=%s | setting=%s | user_id=%s | post_type=%s",
+        chat.id,
+        setting_name,
+        user.id,
+        data.get("type", "unknown"),
     )
 
     if setting_name == "welcome":
@@ -518,37 +531,69 @@ async def greet_member(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
+    """Send the configured welcome post for a confirmed new member."""
     result = update.chat_member
     chat = update.effective_chat
 
     if not result or not chat:
+        log.warning("WELCOME_SKIPPED | reason=missing_chat_member_update")
         return
 
     if not _is_join(result):
-        return
-
-    data = await get_group_setting(
-        chat.id,
-        "welcome",
-    )
-
-    if not data:
+        log.debug(
+            "WELCOME_SKIPPED | reason=not_a_join | chat_id=%s | old_status=%s | new_status=%s",
+            chat.id,
+            result.old_chat_member.status,
+            result.new_chat_member.status,
+        )
         return
 
     user = result.new_chat_member.user
+    log.info(
+        "WELCOME_LOOKUP_STARTED | chat_id=%s | member_id=%s",
+        chat.id,
+        user.id,
+    )
 
     try:
-        await _send_saved_post(
-            chat.id,
-            data,
-            user,
-            context,
-        )
-    except TelegramError:
+        data = await get_group_setting(chat.id, "welcome")
+    except Exception:
         log.exception(
-            "Failed to send welcome | chat_id=%s | user_id=%s",
+            "WELCOME_LOOKUP_FAILED | chat_id=%s | member_id=%s",
             chat.id,
             user.id,
+        )
+        return
+
+    if not data:
+        log.warning(
+            "WELCOME_NOT_CONFIGURED | chat_id=%s | member_id=%s | action=run_setwelcome_in_this_group",
+            chat.id,
+            user.id,
+        )
+        return
+
+    try:
+        await _send_saved_post(chat.id, data, user, context)
+        log.info(
+            "WELCOME_SENT | chat_id=%s | member_id=%s | post_type=%s",
+            chat.id,
+            user.id,
+            data.get("type", "unknown"),
+        )
+    except TelegramError as exc:
+        log.exception(
+            "WELCOME_SEND_FAILED | chat_id=%s | member_id=%s | telegram_error=%s",
+            chat.id,
+            user.id,
+            type(exc).__name__,
+        )
+    except Exception as exc:
+        log.exception(
+            "WELCOME_SEND_FAILED | chat_id=%s | member_id=%s | error_type=%s",
+            chat.id,
+            user.id,
+            type(exc).__name__,
         )
 
 
@@ -560,37 +605,57 @@ async def goodbye_member(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
+    """Send the configured goodbye post for a member who left or was kicked."""
     result = update.chat_member
     chat = update.effective_chat
 
     if not result or not chat:
+        log.warning("GOODBYE_SKIPPED | reason=missing_chat_member_update")
         return
 
     if not _is_leave(result):
         return
 
-    data = await get_group_setting(
-        chat.id,
-        "goodbye",
-    )
-
-    if not data:
-        return
-
     user = result.old_chat_member.user
-
     try:
-        await _send_saved_post(
-            chat.id,
-            data,
-            user,
-            context,
-        )
-    except TelegramError:
+        data = await get_group_setting(chat.id, "goodbye")
+    except Exception:
         log.exception(
-            "Failed to send goodbye | chat_id=%s | user_id=%s",
+            "GOODBYE_LOOKUP_FAILED | chat_id=%s | member_id=%s",
             chat.id,
             user.id,
+        )
+        return
+
+    if not data:
+        log.info(
+            "GOODBYE_NOT_CONFIGURED | chat_id=%s | member_id=%s",
+            chat.id,
+            user.id,
+        )
+        return
+
+    try:
+        await _send_saved_post(chat.id, data, user, context)
+        log.info(
+            "GOODBYE_SENT | chat_id=%s | member_id=%s | post_type=%s",
+            chat.id,
+            user.id,
+            data.get("type", "unknown"),
+        )
+    except TelegramError as exc:
+        log.exception(
+            "GOODBYE_SEND_FAILED | chat_id=%s | member_id=%s | telegram_error=%s",
+            chat.id,
+            user.id,
+            type(exc).__name__,
+        )
+    except Exception as exc:
+        log.exception(
+            "GOODBYE_SEND_FAILED | chat_id=%s | member_id=%s | error_type=%s",
+            chat.id,
+            user.id,
+            type(exc).__name__,
         )
 
 
@@ -602,33 +667,82 @@ async def on_chat_member(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    """Single CHAT_MEMBER handler that dispatches join vs leave.
-
-    greet_member and goodbye_member must NOT be registered as two sibling
-    ChatMemberHandlers in the same group: PTB runs at most one handler per
-    group, so the second one (goodbye) would never execute. One dispatcher
-    guarantees both paths stay reachable.
-    """
+    """Audit every chat-member update and dispatch join/leave actions."""
     result = update.chat_member
+    chat = update.effective_chat
 
     if not result:
+        log.warning("CHAT_MEMBER_UPDATE_IGNORED | reason=missing_payload")
         return
+
+    old_status = result.old_chat_member.status
+    new_status = result.new_chat_member.status
+    member_id = result.new_chat_member.user.id
+    chat_id = chat.id if chat else None
+
+    log.info(
+        "CHAT_MEMBER_UPDATE_RECEIVED | chat_id=%s | member_id=%s | old_status=%s | new_status=%s | actor_id=%s",
+        chat_id,
+        member_id,
+        old_status,
+        new_status,
+        result.from_user.id if result.from_user else None,
+    )
 
     if _is_join(result):
         log.info(
-            "Join event received | chat_id=%s | user_id=%s",
-            update.effective_chat.id if update.effective_chat else None,
-            result.new_chat_member.user.id,
+            "MEMBER_JOIN_DETECTED | chat_id=%s | member_id=%s",
+            chat_id,
+            member_id,
         )
         await greet_member(update, context)
-
     elif _is_leave(result):
         log.info(
-            "Leave event received | chat_id=%s | user_id=%s",
-            update.effective_chat.id if update.effective_chat else None,
-            result.old_chat_member.user.id,
+            "MEMBER_LEAVE_DETECTED | chat_id=%s | member_id=%s",
+            chat_id,
+            member_id,
         )
         await goodbye_member(update, context)
+    else:
+        log.debug(
+            "MEMBER_STATUS_CHANGE_NOT_JOIN_OR_LEAVE | chat_id=%s | member_id=%s | old_status=%s | new_status=%s",
+            chat_id,
+            member_id,
+            old_status,
+            new_status,
+        )
+
+
+# ============================================================
+# BOT ADMIN / MEMBERSHIP AUDIT
+# ============================================================
+
+async def on_bot_chat_member(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    """Log changes to the bot's own membership/administrator status."""
+    result = update.my_chat_member
+    chat = update.effective_chat
+    if not result or not chat:
+        return
+
+    old_status = result.old_chat_member.status
+    new_status = result.new_chat_member.status
+    log.info(
+        "BOT_MEMBERSHIP_STATUS_CHANGED | chat_id=%s | old_status=%s | new_status=%s | actor_id=%s",
+        chat.id,
+        old_status,
+        new_status,
+        result.from_user.id if result.from_user else None,
+    )
+
+    if new_status not in {"administrator", "creator"}:
+        log.warning(
+            "BOT_NOT_ADMIN | chat_id=%s | current_status=%s | requirement=administrator_for_chat_member_updates",
+            chat.id,
+            new_status,
+        )
 
 
 # ============================================================
@@ -720,5 +834,14 @@ member_handlers = [
     ChatMemberHandler(
         on_chat_member,
         ChatMemberHandler.CHAT_MEMBER,
+    ),
+]
+
+
+# Bot's own admin/member status changes are a separate Telegram update type.
+bot_membership_handlers = [
+    ChatMemberHandler(
+        on_bot_chat_member,
+        ChatMemberHandler.MY_CHAT_MEMBER,
     ),
 ]

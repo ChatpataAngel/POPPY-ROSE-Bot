@@ -61,6 +61,8 @@ def test_main_branches_on_ha_enabled():
     assert "asyncio.run(leader_loop(app))" in src
     # Legacy single-instance path is preserved for HA_ENABLED=0.
     assert "app.run_polling(" in src
+    assert "drop_pending_updates=False" in src
+    assert "allowed_updates=Update.ALL_TYPES" in src
 
 
 def test_frontend_assets_exist():
