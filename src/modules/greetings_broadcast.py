@@ -1,7 +1,5 @@
 """POPPY ROSE - welcome, goodbye and global broadcast module."""
 
-import logging
-
 from telegram import Update
 from telegram.ext import (
     CommandHandler,
@@ -11,6 +9,9 @@ from telegram.ext import (
     filters,
 )
 from telegram.error import TelegramError
+import logging
+
+log = logging.getLogger("poppy_rose.greetings")
 
 from src.utils.decorators import admin_only, owner_only
 from src.database.db_core import (
@@ -58,16 +59,15 @@ def _is_join(result) -> bool:
     new_status = result.new_chat_member.status
 
     new_member = result.new_chat_member
-    is_active_restricted_member = (
+    is_restricted_member = (
         new_status == "restricted"
         and bool(getattr(new_member, "is_member", False))
     )
-
     return (
         old_status in {"left", "kicked"}
         and (
-            new_status in {"member", "administrator"}
-            or is_active_restricted_member
+            new_status in {"member", "administrator", "creator"}
+            or is_restricted_member
         )
     )
 
@@ -88,13 +88,10 @@ def _is_leave(result) -> bool:
             "creator",
             "restricted",
         }
-        and (
-            new_status in {"left", "kicked"}
-            or (
-                new_status == "restricted"
-                and not bool(getattr(result.new_chat_member, "is_member", True))
-            )
-        )
+        and new_status in {
+            "left",
+            "kicked",
+        }
     )
 
 
@@ -547,12 +544,11 @@ async def greet_member(
             user,
             context,
         )
-    except TelegramError as exc:
+    except TelegramError:
         log.exception(
-            "Welcome message failed | chat=%s | user=%s | error=%s",
+            "Failed to send welcome | chat_id=%s | user_id=%s",
             chat.id,
             user.id,
-            exc,
         )
 
 
@@ -590,12 +586,11 @@ async def goodbye_member(
             user,
             context,
         )
-    except TelegramError as exc:
+    except TelegramError:
         log.exception(
-            "Goodbye message failed | chat=%s | user=%s | error=%s",
+            "Failed to send goodbye | chat_id=%s | user_id=%s",
             chat.id,
             user.id,
-            exc,
         )
 
 
@@ -620,9 +615,19 @@ async def on_chat_member(
         return
 
     if _is_join(result):
+        log.info(
+            "Join event received | chat_id=%s | user_id=%s",
+            update.effective_chat.id if update.effective_chat else None,
+            result.new_chat_member.user.id,
+        )
         await greet_member(update, context)
 
     elif _is_leave(result):
+        log.info(
+            "Leave event received | chat_id=%s | user_id=%s",
+            update.effective_chat.id if update.effective_chat else None,
+            result.old_chat_member.user.id,
+        )
         await goodbye_member(update, context)
 
 

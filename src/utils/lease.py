@@ -30,9 +30,9 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+from telegram import Update
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
-from telegram import Update
 
 from config import (
     HA_ENABLED,
@@ -234,9 +234,7 @@ async def leader_loop(app, stop: asyncio.Event | None = None) -> None:
                     await app.updater.start_polling(
                         poll_interval=0.0,
                         bootstrap_retries=3,
-                        # Telegram excludes chat_member updates unless explicitly requested.
                         allowed_updates=Update.ALL_TYPES,
-                        # Keep queued membership events when Render restarts this instance.
                         drop_pending_updates=False,
                         error_callback=lambda exc: app.create_task(
                             app.process_error(error=exc, update=None)

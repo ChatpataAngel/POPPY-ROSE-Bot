@@ -562,10 +562,8 @@ def main():
         asyncio.run(leader_loop(app))
     else:
         app.run_polling(
-            # chat_member is excluded by Telegram unless explicitly requested.
+            drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
-            # Do not discard queued membership events during a restart.
-            drop_pending_updates=False,
             bootstrap_retries=-1,
         )
 
