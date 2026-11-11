@@ -1,0 +1,5 @@
+python-telegram-bot==22.8
+motor>=3.7,<4
+pymongo>=4.13,<5
+flask>=3.1,<4
+waitress>=3.0,<4

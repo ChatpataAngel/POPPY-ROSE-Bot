@@ -1,0 +1,171 @@
+==============================================================
+POPPY-ROSE Bot - DEPLOY GUIDE (4x Render + Vercel dashboard)
+==============================================================
+Goal: run ONE Telegram bot token across 4 Render free projects
+so no single account exhausts its 750 hrs/month free limit,
+plus 1 Vercel static dashboard to manage all 4 at once.
+
+How it works (important):
+- Telegram allows only ONE getUpdates() poller per bot token.
+  A 2nd concurrent poller gets "409 Conflict" and they fight.
+- This repo solves it with a MongoDB leader lease:
+  src/utils/lease.py -> collection "instance_leases", doc _id="poller".
+  Every 5s each instance tries atomic find_one_and_update (upsert).
+  Only the lease holder starts PTB polling; others are warm
+  standbys that still serve /health + /api/* for Render + dashboard.
+- Leader dies/sleeps -> lease expires in 45s -> standby takes over
+  in ~50s automatically. No 409 storms, no split-brain.
+
+--------------------------------------------------------------
+0) WHAT YOU NEED
+--------------------------------------------------------------
+1. GitHub account with this repo pushed (public or private).
+2. 4x Render accounts (4 different emails - free: 750h/mo each).
+   1 service per account = each stays under the limit (~720h/mo).
+3. 1x MongoDB Atlas free cluster (ONE shared DB for all 4).
+4. 1x Telegram bot token from @BotFather (ONE token, shared by all 4).
+5. 1x Vercel account (free) for frontend/ dashboard.
+6. Your numeric Telegram OWNER_ID (@userinfobot -> /start).
+
+--------------------------------------------------------------
+1) MONGODB ATLAS (do once, share with all 4)
+--------------------------------------------------------------
+1. https://cloud.mongodb.com -> Create free M0 cluster.
+2. Database Access -> Add user: username + strong password.
+   Give "Read and write to any database".
+3. Network Access -> Allow Access from Anywhere: 0.0.0.0/0
+   (Render IPs change; this is required).
+4. Connect -> Drivers -> Python -> copy URI like:
+   mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+   Replace <user>/<password> with real values. Keep DB_NAME=POPPY_ROSE.
+5. Test URI in Compass/mongosh if unsure.
+
+--------------------------------------------------------------
+2) TELEGRAM TOKEN (do once)
+--------------------------------------------------------------
+1. Telegram -> @BotFather -> /newbot -> name + username -> copy token.
+2. Make the bot admin in your groups where needed.
+3. NEVER commit the token. Leaked token -> @BotFather -> /revoke.
+4. You need exactly ONE token for all 4 Render services.
+
+--------------------------------------------------------------
+3) RENDER - DEPLOY 4 PROJECTS (repeat per account)
+--------------------------------------------------------------
+render.yaml in repo is a TEMPLATE for 1 service. Do NOT put 4
+services in one account (4 x 720h = 2880h > 750h limit).
+
+For account #1..#4 (login each account separately):
+1. Render Dashboard -> New -> Web Service -> Connect GitHub repo.
+2. Settings:
+   Name: poppy-1 (then poppy-2, poppy-3, poppy-4 on other accounts)
+   Runtime: Python 3
+   Build Command: pip install -r requirements.txt
+   Start Command: python -m src
+   Health Check Path: /health
+   Instance: Free
+3. Environment variables (copy exactly):
+
+   SAME on all 4:
+     BOT_TOKEN=<the one token>
+     MONGO_DB_URI=<the one Atlas URI>
+     DB_NAME=POPPY_ROSE
+     OWNER_ID=<your numeric id>
+     HA_ENABLED=true
+     DASHBOARD_API_KEY=<one long random string, SAME on all 4>
+     API_CORS_ORIGINS=*
+     LOG_LEVEL=INFO
+     BROADCAST_DELAY=1.0
+
+   DIFFERENT per project:
+     Account1: INSTANCE_ID=poppy-1
+     Account2: INSTANCE_ID=poppy-2
+     Account3: INSTANCE_ID=poppy-3
+     Account4: INSTANCE_ID=poppy-4
+
+   Optional (defaults ok): LEASE_TTL_SECONDS=45, LEASE_POLL_SECONDS=5
+4. Deploy. Wait for "Live". Open https://poppy-1.onrender.com/health
+   -> {"status":"ok"|"starting"} (503 at first = normal).
+5. Check https://poppy-1.onrender.com/api/status -> shows
+   {"instance_id":"poppy-1","role":"leader"|"follower",...}.
+   Only ONE of the 4 should be "leader" at a time.
+6. Repeat for poppy-2..poppy-4. Save all 4 URLs.
+
+If a service sleeps (free spins down after ~15min idle):
+dashboard auto-refresh wakes it; or visit /health once.
+
+--------------------------------------------------------------
+4) VERCEL - DEPLOY frontend/ DASHBOARD (do once)
+--------------------------------------------------------------
+frontend/ is static (index.html + styles.css + app.js). No build.
+
+Option A - Vercel Dashboard (easiest):
+1. vercel.com -> Add New Project -> Import same GitHub repo.
+2. Configure: Root Directory = frontend   (REQUIRED)
+   Framework Preset = Other, Build Command = (empty),
+   Output Directory = (empty).
+3. Deploy. You get https://poppy-dashboard.vercel.app
+4. No env vars needed on Vercel. API key lives in browser only.
+
+Option B - CLI:
+  npx vercel          # when asked, set project root to ./frontend
+  npx vercel --prod
+
+--------------------------------------------------------------
+5) CONNECT DASHBOARD TO 4 INSTANCES
+--------------------------------------------------------------
+1. Open your Vercel URL -> click [Manage].
+2. Add 4 rows:
+   label=poppy-1 url=https://poppy-1.onrender.com  (etc.)
+3. Paste API key = same DASHBOARD_API_KEY as Render.
+4. Save. Cards appear. Summary shows Leader / Online / Errors /
+   Users / Groups.
+5. Without key: status still works; Stats + Force re-sync give 401.
+6. Force re-sync (on leader card) = POST /api/leadership/release
+   -> leader drops lease -> standby promotes in ~50s.
+   Use for planned deploys / stuck leader.
+
+--------------------------------------------------------------
+6) VERIFY EVERYTHING
+--------------------------------------------------------------
+- Each Render: /health 200 when bot_ready, /api/status role check.
+- Exactly 1 leader: open all 4 /api/status, count role=="leader".
+- Telegram: send /ping or /god -> only leader replies once.
+  4 replies = HA_ENABLED=0 somewhere -> fix it.
+- Dashboard: 4 cards online, latency shown, no CORS errors (F12).
+- Logs: leader shows "is LEADER - Telegram polling started";
+  others show "is a STANDBY".
+- Tests locally: .venv/Scripts/python -m pytest tests -v (19 passed).
+
+--------------------------------------------------------------
+7) TROUBLESHOOTING
+--------------------------------------------------------------
+409 Conflict in logs ......... Two pollers same token. Check:
+  HA_ENABLED=true on ALL 4, same BOT_TOKEN+MONGO+DB_NAME,
+  different INSTANCE_ID. Redeploy.
+All followers, no leader ... Mongo unreachable / wrong MONGO_DB_URI
+  / Atlas IP not 0.0.0.0/0. Check Render logs "lease acquire failed".
+  Leadership stays frozen = by design until Mongo answers.
+401 on /api/stats ............ Wrong DASHBOARD_API_KEY in dashboard
+  vs Render. Copy-paste again (no spaces).
+CORS error in browser ........ API_CORS_ORIGINS=* on Render + redeploy.
+  GET /api/status is public; POST needs OPTIONS preflight (supported).
+Render 503 /health ........... Starting (bot init + Mongo connect).
+  If >3 min: check BOT_TOKEN / OWNER_ID / MONGO logs.
+Bot sleeps, slow reply ....... Free sleep. Open dashboard (auto-refresh
+  10s) to keep awake, or accept ~30-50s cold start.
+Mongo auth failed ............ URL-encode password (@ -> %40 etc.).
+Vercel 404 ................... Root Directory must be "frontend".
+
+--------------------------------------------------------------
+8) FREE-LIMIT MATH + RULES
+--------------------------------------------------------------
+- Render free: 750 hrs/mo per account. 1 always-on = ~720h. So
+  1 service per account = safe. 4 services in 1 account = suspended.
+- Vercel static + Atlas M0 + BotFather are free for this scale.
+- Keep HA_ENABLED=true forever while sharing a token.
+  HA_ENABLED=0 = legacy single-process only (1 instance max).
+- Same repo/branch on all 4 accounts so behaviour matches.
+- Rotate DASHBOARD_API_KEY like a password; never commit .env.
+
+Done. Open dashboard, confirm 1x leader + 3x followers, enjoy.
+==============================================================

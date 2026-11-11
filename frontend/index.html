@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>POPPY ROSE — Cluster Dashboard</title>
+  <meta name="description" content="Frontend of PoppyRoseBot: manage 4 parallel POPPY ROSE bot instances from one dashboard.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌹</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🌹</span>
+      <div>
+        <h1>POPPY&nbsp;ROSE</h1>
+        <p>Frontend of PoppyRoseBot · 4-instance cluster</p>
+      </div>
+    </div>
+    <div class="controls">
+      <label class="ctl">Auto-refresh
+        <select id="interval" title="Dashboard polling interval">
+          <option value="5000">5s</option>
+          <option value="10000" selected>10s</option>
+          <option value="30000">30s</option>
+          <option value="60000">1m</option>
+          <option value="0">off</option>
+        </select>
+      </label>
+      <button id="btn-refresh" class="btn primary" type="button">Refresh now</button>
+      <button id="btn-manage" class="btn" type="button">⚙ Manage</button>
+      <span id="last-sync" class="muted">never synced</span>
+    </div>
+  </header>
+
+  <section id="setup" class="setup hidden" aria-label="Dashboard settings">
+    <h2>Dashboard settings <span class="muted">(saved only in this browser)</span></h2>
+    <label class="field">Shared API key
+      <input type="password" id="api-key" placeholder="value of DASHBOARD_API_KEY on your Render services" autocomplete="off">
+    </label>
+    <div id="instance-rows" class="instance-rows"></div>
+    <div class="setup-actions">
+      <button id="btn-add" class="btn" type="button">+ Add instance</button>
+      <button id="btn-save" class="btn primary" type="button">Save</button>
+      <button id="btn-close" class="btn" type="button">Close</button>
+      <span class="muted">Max 4 instances · URLs like https://poppy-1.onrender.com</span>
+    </div>
+  </section>
+
+  <section class="summary" id="summary" aria-label="Cluster summary">
+    <div class="chip"><span class="muted">Leader</span> <b id="sum-leader">—</b></div>
+    <div class="chip"><span class="muted">Online</span> <b id="sum-online">0/0</b></div>
+    <div class="chip"><span class="muted">Errors</span> <b id="sum-errors">0</b></div>
+    <div class="chip"><span class="muted">Users</span> <b id="sum-users">—</b></div>
+    <div class="chip"><span class="muted">Groups</span> <b id="sum-groups">—</b></div>
+  </section>
+
+  <main id="cards" class="grid" aria-live="polite"></main>
+
+  <div id="empty" class="empty">
+    <p>🌹 No instances configured yet.</p>
+    <p class="muted">Press <b>⚙ Manage</b> and add the URLs of your 4 Render services.</p>
+  </div>
+
+  <template id="card-tpl">
+    <article class="card">
+      <header class="card-head">
+        <span class="name"></span>
+        <span class="badge"></span>
+      </header>
+      <div class="meta">
+        <div class="mrow"><span>Bot</span><b class="bot">—</b></div>
+        <div class="mrow"><span>Instance</span><code class="iid">—</code></div>
+        <div class="mrow"><span>Uptime</span><b class="uptime">—</b></div>
+        <div class="mrow"><span>API latency</span><b class="latency">—</b></div>
+        <div class="mrow"><span>Leader since</span><b class="since">—</b></div>
+        <div class="mrow"><span>Lease expires in</span><b class="lease">—</b></div>
+      </div>
+      <div class="err hidden">
+        <span class="err-count"></span>
+        <p class="err-text"></p>
+      </div>
+      <footer class="card-foot">
+        <span class="url muted"></span>
+        <div class="actions">
+          <button class="btn tiny danger resync hidden" type="button" title="Release the leader lease so a standby takes over">Force re-sync</button>
+          <a class="btn tiny" target="_blank" rel="noopener">Open ↗</a>
+        </div>
+      </footer>
+    </article>
+  </template>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <footer class="pagefoot muted">
+    POPPY ROSE cluster · one bot token, four instances, MongoDB leader lease · deploy this page on <b>Vercel</b>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

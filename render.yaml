@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: poppy-rose-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGO_DB_URI
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: DB_NAME
+        value: POPPY_ROSE
+      - key: LOG_LEVEL
+        value: INFO
+      - key: BROADCAST_DELAY
+        value: "1.0"
+      # --- Multi-instance HA (4 projects sharing ONE bot token) ---
+      # All instances must share the same BOT_TOKEN + MONGO_DB_URI + DB_NAME.
+      # Each project must use a DIFFERENT INSTANCE_ID (poppy-1 ... poppy-4).
+      - key: HA_ENABLED
+        value: "true"
+      - key: INSTANCE_ID
+        value: poppy-1
+      - key: DASHBOARD_API_KEY
+        sync: false
+      - key: API_CORS_ORIGINS
+        value: "*"
