@@ -186,6 +186,7 @@ async def help_cmd(
 
         "🌹 *Welcome & Goodbye*\n"
         "/setwelcome — Configure welcome message\n"
+        "/welcomecheck — Diagnose welcome setup\n"
         "/setgoodbye — Configure goodbye message\n"
         "/setwelcome off — Disable welcome\n"
         "/setgoodbye off — Disable goodbye\n\n"

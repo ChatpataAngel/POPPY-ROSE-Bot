@@ -40,3 +40,12 @@ Common outcomes:
 ## Security limitations
 
 Redaction is defense in depth, not a guarantee that arbitrary unknown secret formats can never be logged. Never log environment variables, request headers, bot objects, raw configuration dictionaries, or message contents. Do not paste credentials into support chats. Revoke any credential previously exposed and replace it in Render.
+
+## Welcome-event troubleshooting (v4)
+
+Run `/welcomecheck` in the affected group. It checks the bot's current Telegram
+membership status and the saved welcome setting. The service-message fallback
+is also registered and logs `NEW_CHAT_MEMBERS_SERVICE_UPDATE_RECEIVED` when
+Telegram includes that service update. It is a fallback, not a replacement for
+being an administrator: Telegram may omit such service messages in some
+supergroups, while `chat_member` updates require administrator status.

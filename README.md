@@ -27,7 +27,7 @@ Moderation: `/ban`, `/unban`, `/kick`, `/mute`, `/unmute`, `/warn`, `/warnings`,
 
 Protection: `/lock`, `/unlock`, `/purge`
 
-Management: `/promote`, `/demote`, `/pin`, `/unpin`, `/info`, `/setwelcome`, `/setrules`, `/save`, `/get`, `/delnote`
+Management: `/promote`, `/demote`, `/pin`, `/unpin`, `/info`, `/setwelcome`, `/welcomecheck`, `/setrules`, `/save`, `/get`, `/delnote`
 
 Owner: `/god`, `/ownerhelp`, `/stats`, `/broadcast`, `/announce`, `/addowner`, `/delowner`
 

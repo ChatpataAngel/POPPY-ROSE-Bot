@@ -135,17 +135,24 @@ async def audit_update(
     if message and message.text and message.text.startswith("/"):
         command = message.text.split(maxsplit=1)[0].split("@", 1)[0]
 
+    service_kind = None
+    if message and message.new_chat_members:
+        service_kind = "new_chat_members"
+    elif message and message.left_chat_member:
+        service_kind = "left_chat_member"
+
     # Keep ordinary message traffic at DEBUG to prevent noisy production logs.
     # Membership events, commands, callbacks and other system updates are INFO.
     level = (
         logging.INFO
-        if command or update_type not in {"message", "edited_message"}
+        if command or service_kind or update_type not in {"message", "edited_message"}
         else logging.DEBUG
     )
     log.log(
         level,
-        "UPDATE_RECEIVED | type=%s | chat_id=%s | user_id=%s | command=%s",
+        "UPDATE_RECEIVED | type=%s | service_kind=%s | chat_id=%s | user_id=%s | command=%s",
         update_type,
+        service_kind or "-",
         chat.id if chat else None,
         user.id if user else None,
         command or "-",
@@ -353,6 +360,10 @@ async def post_init(app):
             "Configure welcome message",
         ),
         (
+            "welcomecheck",
+            "Diagnose welcome message setup",
+        ),
+        (
             "setgoodbye",
             "Configure goodbye message",
         ),
@@ -496,7 +507,7 @@ async def post_shutdown(app):
 #    0  : all command/UI handlers
 #    1  : receive_greeting_post  (/setwelcome follow-up capture)
 #    2  : filter_locked          (content locks enforcement)
-#    3  : on_chat_member         (welcome/goodbye dispatch)
+#    3  : member events          (chat_member + new_chat_members fallback)
 #    4  : on_bot_chat_member     (bot admin-status audit)
 #
 # Each catch-all handler sits alone in its own group so it can neither
@@ -578,7 +589,7 @@ def register_handlers(app):
     )
 
     log.info(
-        "HANDLERS_REGISTERED | commands_and_messages=enabled | chat_member=enabled | bot_membership_audit=enabled | member_group=%s | bot_status_group=%s",
+        "HANDLERS_REGISTERED | commands_and_messages=enabled | chat_member=enabled | service_message_fallback=enabled | bot_membership_audit=enabled | member_group=%s | bot_status_group=%s",
         GROUP_MEMBER_EVENTS,
         GROUP_BOT_STATUS_EVENTS,
     )

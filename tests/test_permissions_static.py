@@ -201,6 +201,25 @@ def test_runtime_handler_groups():
     assert len(only_member) == 1
 
 
+def test_welcome_has_service_message_fallback_and_diagnostics():
+    """A new_chat_members service message is a second, deduplicated path."""
+    greet_src = _read("src/modules/greetings_broadcast.py")
+    main_src = _read("src/__main__.py")
+
+    assert "async def on_new_chat_members(" in greet_src
+    assert "filters.StatusUpdate.NEW_CHAT_MEMBERS" in greet_src
+    assert 'source="service_message"' in greet_src
+    assert "WELCOME_DUPLICATE_SUPPRESSED" in greet_src
+    assert "async def welcome_check(" in greet_src
+    assert '"welcomecheck"' in main_src
+    assert "service_kind = \"new_chat_members\"" in main_src
+    assert "service_message_fallback=enabled" in main_src
+
+    # A join service message must not be mistaken for the admin's pending
+    # /setwelcome media/text payload.
+    assert "~filters.StatusUpdate.ALL" in greet_src
+
+
 def test_ping_command_is_registered_and_documented():
     """/ping must live in the shared command group, be listed in /help,
     and surface the errors tracked by the shared error handler."""
